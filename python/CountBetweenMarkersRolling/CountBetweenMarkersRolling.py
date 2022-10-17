@@ -13,14 +13,13 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
     Once the data array is full, it cycles back to beginning and starts writing over the old values. 
     This way, only the latest data is stored in the data array. 
     When quering the data, the user can chose whether a rolling or a sweeping readout is wanted with getData(rolling=True/False).
-    Warning: This measurement does not implement a stop channel, it does not have proper handling of overflows (only throws a text message), it does not allow to query the data and the index objects at the same time (hence, they will never be consistent)
+    Warning: This measurement does not implement a stop channel, it does not have proper handling of overflows (only throws a text message)
     The measurement was written in response to support case #841, where a customer was doing measurements on a quantum repeater node. 
     He was doing repeated CountBetweenMarkers measurements, but also wanted a continuous version, so that he could monitor the operation of his network node 24/7.
     """
 
     def __init__(self, tagger, click_channel, start_channel, n_values):
         TimeTagger.CustomMeasurement.__init__(self, tagger)
-        assert start_channel != click_channel, 'Start and click channel should be different'
         assert n_values > 0, 'The bin number should be a positive integer value.'
 
         self.click_channel = click_channel
@@ -44,28 +43,36 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
         # concurrent process() calls.
         self.stop()
 
-    def getData(self, rolling=True):
+    def __getData(self, rolling=True):
         # Acquire a lock this instance to guarantee that process() is not running in parallel
         # This ensures to return a consistent data.
         if rolling:
-            with self.mutex:
-                return np.append(
-                    self.data[self.index:].copy(), self.data[:self.index].copy())
+            return np.append(
+                self.data[self.index:].copy(), self.data[:self.index].copy())
         else:
-            with self.mutex:
-                return self.data.copy()
+            return self.data.copy()
 
-    def getIndex(self, rolling=True):
+    def __getIndex(self, rolling=True):
         # This method does not depend on the internal state, so there is no
         # need for a lock.
         if rolling:
-            with self.mutex:
                 tmp = np.append(self.timestamps[self.index:].copy(
                 ) - self.gaps, self.timestamps[:self.index].copy())
                 return tmp.copy() - tmp[0]
         else:
-            with self.mutex:
                 return self.timestamps.copy()
+
+    def getIndex(self, rolling=True):
+        with self.mutex:
+            return self.__getIndex(rolling)
+        
+    def getData(self, rolling=True):
+        with self.mutex:
+            return self.__getData(rolling)
+
+    def getIndexAndData(self, rolling=True):
+        with self.mutex:
+            return self.__getIndex(rolling), self.__getData(rolling)
 
     def clear_impl(self):
         # The lock is already acquired within the backend.
@@ -114,12 +121,16 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
                 # tag is not a TimeTag, so we are in an error state, e.g. overflow
                 # throw a text warning
                 print('overflows present, output may be inconsistent')
-            elif tag['channel'] == click_channel and first_timestamp != 0:
+            if tag['channel'] == click_channel and first_timestamp != 0:
                 # add a count to temporay bin counter
                 tempory_bin_counter += 1
-            elif tag['channel'] == start_channel:
+            if tag['channel'] == start_channel:
                 # on marker signal, store fully integrated data in the current
                 # bin and save the next marker time
+
+                # check if this is the first start tag of the measurement
+                if first_timestamp == 0:
+                    first_timestamp = tag['time']
 
                 if index == data.shape[0] - 1:
                     # if circular buffer is at the end, start a new time axis,
@@ -136,7 +147,7 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
                 tempory_bin_counter = 0
                 index = (index + 1) if index + 1 < data.shape[0] else 0
 
-        return index, gap
+        return index, gap, first_timestamp, tempory_bin_counter, next_timestamp
 
     def process(self, incoming_tags, begin_time, end_time):
         """
@@ -159,7 +170,7 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
         end_time
             End timestamp of the of the current data block.
         """
-        self.index, self.gaps = CountBetweenMarkersRolling.fast_process(
+        self.index, self.gaps, self.first_timestamp, self.tempory_bin_counter, self.next_timestamp = CountBetweenMarkersRolling.fast_process(
             incoming_tags,
             self.data,
             self.click_channel,
@@ -173,8 +184,8 @@ class CountBetweenMarkersRolling(TimeTagger.CustomMeasurement):
 
 
 # Channel definitions
-CHAN_START = 1
-CHAN_STOP = 2
+CHAN_START = 2
+CHAN_STOP = 1
 
 if __name__ == '__main__':
 
@@ -205,19 +216,20 @@ Implementation of a custom CountBetweenMarkers measurement with a circular buffe
             measurementGroup.getTagger(), CHAN_STOP, CHAN_START, n_values=BINS)
 
         print("Acquire data...\n")
-        measurementGroup.startFor(int(6e9))
-        measurementGroup.waitUntilFinished()
+        measurementGroup.start()
+        sleep(.6)
 
-        x_roll_counter = custom_counter.getIndex(rolling=True)
-        y_roll_counter = custom_counter.getData(rolling=True)
+        index1, data1 = custom_counter.getIndexAndData(rolling=True)
+        
+        sleep(1.1)
+        index2, data2 = custom_counter.getIndexAndData(rolling=True)
 
-        x_sweep_counter = custom_counter.getIndex(rolling=False)
-        y_sweep_counter = custom_counter.getData(rolling=False)
+
 
     TimeTagger.freeTimeTagger(tagger)
 
-    plt.plot(x_roll_counter, y_roll_counter, label='rolling counter')
-    plt.plot(x_sweep_counter, y_sweep_counter, '--', label='sweeping counter')
+    plt.plot(index1, data1, label='output1')
+    plt.plot(index2, data2, '--', label='output2')
     plt.xlabel('Time difference (ps)')
     plt.ylabel('Counts')
     plt.legend()
