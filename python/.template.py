@@ -90,33 +90,33 @@ class MyCustomMeasurement(TimeTagger.CustomMeasurement):
         )
 
     
-    import numba
+import numba
 
-    @numba.jit(nopython=True, nogil=True)
-    def fast_process(tags, begin_time, end_time, channel, last_timestamp, data):
-        """
-        Numba will precompile this function on-the-fly for better performance.
-        Read more on the supported Python features:
-            https://numba.pydata.org/numba-doc/dev/reference/pysupported.html
-        nopython=True: Only a subset of the python syntax is supported.
-                       Avoid everything but primitives and numpy arrays.
-                       All slow operation will yield an exception
-        nogil=True:    This method will release the global interpreter lock. So
-                       this method can run in parallel with other python code
-        """
-        for tag in tags:
-            # tag.type can be: 0 - TimeTag, 1- Error, 2 - OverflowBegin, 3 -
-            # OverflowEnd, 4 - MissedEvents
-            if tag['type'] != 0:
-                # tag is not a TimeTag, so we are in an error state, e.g. overflow
-                last_timestamp = 0
-            elif tag['channel'] == channel and last_timestamp != 0:
-                # valid event
-                index = (tag['time'] - last_timestamp) // 1000
-                if index < data.shape[0]:
-                    data[index] += 1
-                last_timestamp = tag['time']
-        return last_timestamp
+@numba.jit(nopython=True, nogil=True)
+def fast_process(tags, begin_time, end_time, channel, last_timestamp, data):
+    """
+    Numba will precompile this function on-the-fly for better performance.
+    Read more on the supported Python features:
+        https://numba.pydata.org/numba-doc/dev/reference/pysupported.html
+    nopython=True: Only a subset of the python syntax is supported.
+                    Avoid everything but primitives and numpy arrays.
+                    All slow operation will yield an exception
+    nogil=True:    This method will release the global interpreter lock. So
+                    this method can run in parallel with other python code
+    """
+    for tag in tags:
+        # tag.type can be: 0 - TimeTag, 1- Error, 2 - OverflowBegin, 3 -
+        # OverflowEnd, 4 - MissedEvents
+        if tag['type'] != 0:
+            # tag is not a TimeTag, so we are in an error state, e.g. overflow
+            last_timestamp = 0
+        elif tag['channel'] == channel and last_timestamp != 0:
+            # valid event
+            index = (tag['time'] - last_timestamp) // 1000
+            if index < data.shape[0]:
+                data[index] += 1
+            last_timestamp = tag['time']
+    return last_timestamp
 
     
 if __name__ == '__main__':
