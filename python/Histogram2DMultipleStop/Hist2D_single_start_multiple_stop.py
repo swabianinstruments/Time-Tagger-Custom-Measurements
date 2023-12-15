@@ -1,3 +1,32 @@
+"""
+Simple example for a Python implementation of a 2D Histogram with single start multiple stop.
+Authors: Tim Wolz  <tim.wolz@swabianinstruments.com>, Igor Shavrin, <igor@swabianinstruments.com>
+License: BSD 3-Clause
+
+This measurement counts multiple stop clicks for a single start click and sorts them into a 2d array from time
+differences with respect to the start click.
+
+Usage example:
+    hist_2d = Histogram2D_MultipleStop(
+        tagger,   # TimeTagger object
+        start_channel, # channel to start the time difference
+        stop_channel_1 # channel to stop the time difference along axis 1
+        stop_channel_2 # channel to stop the time difference along axis 2
+        binwidth_1 # in ps
+        bindwidth_2 # in ps
+        n_bins_1 # number of bins for axis 1
+        n_bins_2 # number of bins for axis 2
+        max_clicks  # Number of maximum expected clicks on each stop channel in between clicks on the start channel
+    )
+
+Dependencies:
+    numba
+    numpy
+    matplotlib.pyplot
+    TimeTagger
+"""
+
+
 import matplotlib.pyplot as plt
 import TimeTagger
 import numpy as np
