@@ -70,7 +70,7 @@ class PhaseNoise(TT.CustomMeasurement):
                         self.first_sample = tag['time']
                     elif self.sample_counter == 1:
                         self.first_period = tag['time'] - self.first_sample
-                    rel_time = tag['time'] - \
+                    rel_time = tag['time'] - self.first_sample - \
                         self.first_period * self.sample_counter
                     self.sample_counter += 1
 
@@ -87,11 +87,12 @@ class PhaseNoise(TT.CustomMeasurement):
                         if True:
                             # Linear regression
                             x = np.arange(NFFT)
-                            t = t - x * (12 * np.sum(x*t) - 6 * (NFFT - 1)
-                                         * np.sum(t)) / (NFFT * (NFFT * NFFT - 1)) - t[0]
+                            t = t - t[0] - x * (12 * np.sum(x*t) - 6 * (NFFT - 1)
+                                         * np.sum(t)) / (NFFT * (NFFT * NFFT - 1))
 
                         # Sum up the PSD of this phase trace
-                        self.PSDs[i] += np.abs(np.fft.rfft(t * self.window))**2
+                        fft_data = np.fft.rfft(t * self.window)
+                        self.PSDs[i] += fft_data.real**2 + fft_data.imag**2
                         self.PSDs_count[i] += 1
 
                         if i+1 < octaves and self.traces_utilization[i+1] == 0:
@@ -122,8 +123,7 @@ class PhaseNoise(TT.CustomMeasurement):
         self.register_channel(channel=channel)
         self.freq = freq
 
-        window = get_window('hann', NFFT)
-        window *= 1 / np.mean(window)
+        window = get_window('hann', NFFT) * np.sqrt(8/3)
         self.kernel = self.Kernel(channel, window)
 
         self.finalize_init()
@@ -144,14 +144,14 @@ class PhaseNoise(TT.CustomMeasurement):
                     continue
 
                 # Skip the lower half of all but the first octave
-                lower_index = 1 if len(f) == 0 else NFFT // 4
+                lower_index = 1 if len(f) == 0 else NFFT // 4 + 1
 
                 scale_PSD = (1e-12 * 2*np.pi*self.freq)**2 / \
                     (self.kernel.PSDs_count[i] * NFFT * self.freq * 2**i)
                 f = np.concatenate(
-                    (f, (self.freq / NFFT / 2**i) * np.arange(NFFT // 2 + 1)[lower_index: -1]))
+                    (f, (self.freq / NFFT / 2**i) * np.arange(NFFT // 2 + 1)[lower_index:]))
                 dBcHz = np.concatenate(
-                    (dBcHz, 10 * np.log10(scale_PSD * self.kernel.PSDs[i, lower_index: -1])))
+                    (dBcHz, 10 * np.log10(scale_PSD * self.kernel.PSDs[i, lower_index:])))
 
             return f, dBcHz
 
