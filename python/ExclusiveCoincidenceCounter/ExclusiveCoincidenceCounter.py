@@ -35,7 +35,7 @@ Dependencies:
 from typing import Union, NamedTuple
 import numba
 import numpy as np
-import TimeTagger
+from Swabian import TimeTagger
 
 
 # Exclusive coincidence group

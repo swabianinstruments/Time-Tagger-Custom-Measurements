@@ -1,4 +1,4 @@
-import TimeTagger
+from Swabian import TimeTagger
 import numpy as np
 from scipy.stats import linregress
 from scipy import signal

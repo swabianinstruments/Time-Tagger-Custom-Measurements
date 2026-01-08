@@ -1,4 +1,4 @@
-import TimeTagger
+from Swabian import TimeTagger
 import numpy as np
 import numba
 from collections import deque
