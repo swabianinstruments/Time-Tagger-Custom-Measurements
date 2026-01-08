@@ -19,7 +19,7 @@ Dependencies:
     TimeTagger
 """
 
-import TimeTagger
+from Swabian import TimeTagger
 import numpy as np
 
 

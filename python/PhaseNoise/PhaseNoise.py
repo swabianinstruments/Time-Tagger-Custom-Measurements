@@ -1,4 +1,4 @@
-import TimeTagger as TT
+from Swabian import TimeTagger as TT
 import numpy as np
 from scipy.signal import get_window
 import numba
