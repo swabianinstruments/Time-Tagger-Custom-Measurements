@@ -253,20 +253,98 @@ class SyncFrequencyCounter(TimeTagger.CustomMeasurement):
             ):
                 del buf[:drop]
 
-    def getDataObject(self):
+    def getDataObject(self, remove=False):
         """
-        Returns a FrequencyCounterData object
+        Returns a FrequencyCounterData object.
+
+        Parameters
+        ----------
+        remove : bool, optional
+            Controls if the returned data shall be removed from the internal
+            buffer (default = False).
         """
         with self.mutex:
-            n_sync, n_chan = len(self.kernel._out_sync_times[:-1]), len(self.channels)
+            n_chan = len(self.channels)
+
+            # number of *complete* windows
+            n_sync_total = len(self.kernel._out_sync_times)
+            if n_sync_total <= 1:
+                # no complete window yet: return empty arrays, but preserve sync times
+                sync_times = np.array(self.kernel._out_sync_times, dtype=np.uint64)
+
+                empty_counts = np.empty((0, n_chan), dtype=np.uint64)
+                empty_frac = np.empty((0, n_chan), dtype=np.float64)
+                empty_phase = np.empty((0, n_chan), dtype=np.float64)
+                empty_freq = np.empty((0, n_chan), dtype=np.float64)
+                empty_ifreq = np.empty((0, n_chan), dtype=np.float64)
+                empty_oflow = np.empty((0, n_chan), dtype=np.uint8)
+
+                return FrequencyCounterData(
+                    sync_times,
+                    empty_counts,
+                    empty_frac,
+                    empty_phase,
+                    empty_freq,
+                    empty_ifreq,
+                    empty_oflow,
+                )
+
+            # we always have one extra sync time at the end, which belongs to the
+            # *next* (not yet fully known) window
+            n_sync = n_sync_total - 1
+            n_vals = n_sync * n_chan
+
+            # time axis: keep all sync times (FrequencyCounterData.getTime() uses[:-1])
             sync_times = np.array(self.kernel._out_sync_times, dtype=np.uint64)
-            counts = np.array(self.kernel._out_counts, dtype=np.uint64).reshape(n_sync, n_chan)
-            fractional_phase = np.array(self.kernel._out_fractional_phase, dtype=np.float64).reshape(n_sync, n_chan)
+
+            # use only the elements belonging to the fully completed windows
+            counts = np.array(self.kernel._out_counts[:n_vals], dtype=np.uint64).reshape(n_sync, n_chan)
+            fractional_phase = np.array(
+                self.kernel._out_fractional_phase[:n_vals],
+                dtype=np.float64,
+            ).reshape(n_sync, n_chan)
             phase = counts.astype(np.float64) + fractional_phase
-            frequency = np.array(self.kernel._out_frequency, dtype=np.float64).reshape(n_sync, n_chan)
-            instantaneous_frequency = np.array(self.kernel._out_instantaneous_frequency, dtype=np.float64).reshape(n_sync, n_chan)
-            is_overflow = np.array(self.kernel._out_is_overflow, dtype=np.uint8).reshape(n_sync, n_chan)
-            return FrequencyCounterData(sync_times, counts, fractional_phase, phase, frequency, instantaneous_frequency, is_overflow)
+            frequency = np.array(
+                self.kernel._out_frequency[:n_vals],
+                dtype=np.float64,
+            ).reshape(n_sync, n_chan)
+            instantaneous_frequency = np.array(
+                self.kernel._out_instantaneous_frequency[:n_vals],
+                dtype=np.float64,
+            ).reshape(n_sync, n_chan)
+            is_overflow = np.array(
+                self.kernel._out_is_overflow[:n_vals],
+                dtype=np.uint8,
+            ).reshape(n_sync, n_chan)
+
+            data = FrequencyCounterData(
+                sync_times,
+                counts,
+                fractional_phase,
+                phase,
+                frequency,
+                instantaneous_frequency,
+                is_overflow,
+            )
+
+            # --- implement the "remove" semantics ---
+            if remove:
+                # drop the n_sync oldest windows
+                #   - for sync times we drop n_sync entries, leaving the last one
+                #     as the starting point of the next window
+                del self.kernel._out_sync_times[:n_sync]
+
+                for buf in (
+                    self.kernel._out_counts,
+                    self.kernel._out_fractional_phase,
+                    self.kernel._out_phase,
+                    self.kernel._out_frequency,
+                    self.kernel._out_instantaneous_frequency,
+                    self.kernel._out_is_overflow,
+                ):
+                    del buf[:n_vals]
+
+            return data
 
 
 class FrequencyCounterData:
@@ -340,16 +418,21 @@ if __name__ == '__main__':
     # Plot the instantaneous and averaged frequencies
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
+    flag = 0
     while sm.isRunning():
         plt.pause(.2)
         ax1.cla(); ax2.cla()
         fc_data = fc.getDataObject()
-        sync_fc_data = sync_fc.getDataObject()
+        sync_fc_data = sync_fc.getDataObject(remove=False)
 
         sampling_times = fc_data.getTime()
         sync_times = sync_fc_data.getTime()
 
-        ax1.plot((sync_times-sync_times[0])/1e12, sync_fc_data.getFrequencyInstantaneous()[0], marker='o', linewidth=0, color='k', label='CUSTOM')
+        if flag==0:
+            sync_t0=sync_times[0]
+            flag=1
+
+        ax1.plot((sync_times-sync_t0)/1e12, sync_fc_data.getFrequencyInstantaneous()[0], marker='o', linewidth=0, color='k', label='CUSTOM')
         ax1.plot(sampling_times/1e12, fc_data.getFrequencyInstantaneous()[0],  marker='o', linewidth=0, label='API')
         ax1.set_ylabel('Instantaneous Frequency [Hz]')
         ax1.set_xlabel('Time [s]')
@@ -357,7 +440,7 @@ if __name__ == '__main__':
         ax1.legend(loc="upper right")
         ax1.grid(which='minor', axis='x', linestyle=':')
 
-        ax2.plot((sync_times-sync_times[0])/1e12, sync_fc_data.getFrequency()[0], marker='o', linewidth=0, color='k', label='CUSTOM')
+        ax2.plot((sync_times-sync_t0)/1e12, sync_fc_data.getFrequency()[0], marker='o', linewidth=0, color='k', label='CUSTOM')
         ax2.plot(sampling_times/1e12, fc_data.getFrequency()[0], marker='o', linewidth=0, label='API')
         ax2.set_ylabel('Frequency [Hz]')
         ax2.set_xlabel('Time [s]')
